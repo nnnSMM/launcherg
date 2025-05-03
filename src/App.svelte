@@ -7,12 +7,22 @@
   import { onMount } from "svelte";
   import { initializeAllGameCache } from "@/lib/scrapeAllGame";
   import ImportDropFiles from "@/components/Home/ImportDropFiles.svelte";
+  
+  import { getCurrentWindow } from "@tauri-apps/api/window";
 
   $: setDetailPromise = registerCollectionElementDetails();
 
-  onMount(() => {
+  onMount(async () => {
+    // フロントエンド用の各種初期化
     initialize();
     initializeAllGameCache();
+
+    // データ読み込み完了を待機
+    await registerCollectionElementDetails();
+
+    // ウィンドウを取得して表示
+    const appWindow = getCurrentWindow();
+    await appWindow.show();
   });
 </script>
 
