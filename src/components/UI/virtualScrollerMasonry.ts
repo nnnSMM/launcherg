@@ -12,7 +12,6 @@ export const useVirtualScrollerMasonry = (
   const itemGap = 16;
   const placeholderHeight = 16 * 8;
 
-  // 各セルのレイアウト情報
   type Cell = {
     top: number;
     left: number;
@@ -20,15 +19,11 @@ export const useVirtualScrollerMasonry = (
     height: number;
     element: CollectionElement;
   };
-  // Layout は列の配列を並べた 2 次元配列
   type Layout = Cell[][];
 
   const buffer = 5;
-  const beamWidth = 3;
+  const beamWidth = 5;
 
-  /**
-   * グリーディー法で残り要素を配置し、最終コンテナ高さを評価
-   */
   function evaluateGreedy(
     base: Layout,
     remaining: CollectionElement[],
@@ -39,17 +34,15 @@ export const useVirtualScrollerMasonry = (
       const h = ele.thumbnailWidth && ele.thumbnailHeight
         ? Math.floor((itemWidth / ele.thumbnailWidth) * ele.thumbnailHeight)
         : placeholderHeight;
-      // 各列の現在の底部
       const bottoms = cols.map(col =>
         col.length > 0
           ? col[col.length - 1].top + col[col.length - 1].height
           : 0
       );
       const idx = bottoms.indexOf(Math.min(...bottoms));
-      const top = (cols[idx].length > 0 ? bottoms[idx] + itemGap : 0);
+      const top = cols[idx].length > 0 ? bottoms[idx] + itemGap : 0;
       cols[idx].push({ top, left: idx * (itemWidth + itemGap), width: itemWidth, height: h, element: ele });
     }
-    // 列ごとの高さを計算し最大を返す
     return Math.max(
       ...cols.map(col =>
         col.length > 0 ? col[col.length - 1].top + col[col.length - 1].height : 0
@@ -57,18 +50,14 @@ export const useVirtualScrollerMasonry = (
     );
   }
 
-  /**
-   * ビームサーチで最適レイアウトを探索
-   */
   const calculateLayouts = (
     elements: CollectionElement[],
     containerWidth: number
-  ): Layout => {
-    if (!containerWidth || elements.length === 0) return [];
+  ): { layout: Layout; columns: number; itemWidth: number } => {
+    if (!containerWidth || elements.length === 0) return { layout: [], columns: 0, itemWidth: 0 };
     const itemNumPerRow = Math.floor((containerWidth + itemGap) / (minItemWidth + itemGap));
     const itemWidth = Math.floor((containerWidth - itemGap * (itemNumPerRow - 1)) / itemNumPerRow);
 
-    // 初期ビーム: 空の列を itemNumPerRow 個
     let beams: { layout: Layout; score: number }[] = [
       { layout: Array.from({ length: itemNumPerRow }, () => []), score: 0 }
     ];
@@ -87,7 +76,7 @@ export const useVirtualScrollerMasonry = (
               ? col[col.length - 1].top + col[col.length - 1].height
               : 0
           );
-          const top = (baseLayout[colIdx].length > 0 ? bottoms[colIdx] + itemGap : 0);
+          const top = baseLayout[colIdx].length > 0 ? bottoms[colIdx] + itemGap : 0;
           baseLayout[colIdx].push({ top, left: colIdx * (itemWidth + itemGap), width: itemWidth, height: h, element: ele });
 
           const remaining = elements.slice(idx + 1);
@@ -96,27 +85,57 @@ export const useVirtualScrollerMasonry = (
         }
       });
 
-      // スコア昇順でソートし、上位 beamWidth 件を残す
       newBeams.sort((a, b) => a.score - b.score);
       beams = newBeams.slice(0, beamWidth);
     });
 
-    // 最良ビームのレイアウトを返却
-    return beams[0].layout;
+    return { layout: beams[0].layout, columns: itemNumPerRow, itemWidth };
   };
 
-  // 全レイアウトを計算し store に持たせる
+  let prevColumns = 0;
+  let prevLayout: Layout = [];
+  let prevItemWidth = 0;
+
   const layouts = derived<
     [typeof elements, typeof contentsWidth],
     Layout
   >(
     [elements, contentsWidth],
     ([$elements, $contentsWidth], set) => {
-      set(calculateLayouts($elements, $contentsWidth));
+      const { layout, columns, itemWidth } = calculateLayouts($elements, $contentsWidth);
+      if (columns !== prevColumns) {
+        // 列数が変わったら全レイアウトを新規計算
+        prevColumns = columns;
+        prevLayout = layout;
+        prevItemWidth = itemWidth;
+        set(layout);
+      } else {
+        // 列数同じなら配置順は維持しつつサイズのみ更新
+        const newLayout: Layout = prevLayout.map((col, colIdx) => {
+          let currentTop = 0;
+          return col.map((cell) => {
+            const h = cell.element.thumbnailWidth && cell.element.thumbnailHeight
+              ? Math.floor((itemWidth / cell.element.thumbnailWidth) * cell.element.thumbnailHeight)
+              : placeholderHeight;
+            const top = currentTop;
+            const updated: Cell = {
+              top,
+              left: colIdx * (itemWidth + itemGap),
+              width: itemWidth,
+              height: h,
+              element: cell.element,
+            };
+            currentTop = top + h + itemGap;
+            return updated;
+          });
+        });
+        prevLayout = newLayout;
+        prevItemWidth = itemWidth;
+        set(newLayout);
+      }
     }
   );
 
-  // 仮想領域の高さを更新 (空列は高さ0 とする)
   layouts.subscribe(cols => {
     const heights = cols.map(col =>
       col.length > 0 ? col[col.length - 1].top + col[col.length - 1].height : 0
@@ -124,9 +143,6 @@ export const useVirtualScrollerMasonry = (
     setVirtualHeight(Math.max(...heights));
   });
 
-  /**
-   * 可視領域のレイアウトを返却
-   */
   const calculateVisibleLayouts = (
     cols: Layout,
     scrollTop: number,
