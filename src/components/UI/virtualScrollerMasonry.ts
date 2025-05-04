@@ -11,7 +11,6 @@ export const useVirtualScrollerMasonry = (
 ) => {
   const minItemWidth = 16 * 16;
   const itemGap = 16;
-
   const placeholderHeight = 16 * 8;
 
   type Layout = {
@@ -20,140 +19,137 @@ export const useVirtualScrollerMasonry = (
     width: number;
     height: number;
     element: CollectionElement;
-  }[];
+  };
 
-  // virtual scroll するために表示されている layout とその上下${buffer}行分を保持する
+  type Layouts = Layout[][];
+
   const buffer = 5;
 
-  // 全ての要素が表示されたときの layout を計算する
+  // beamWidth を調整することで探索幅を制御
+  const beamWidth = 5;
+
+  // greedy playout で最終的な高さを評価する関数
+  function evaluateGreedy(layouts: Layouts, remaining: CollectionElement[], itemWidth: number) {
+    // 深いコピー
+    const cols = layouts.map(col => [...col]);
+    const gaps = itemGap;
+    // playout
+    for (const ele of remaining) {
+      const h = ele.thumbnailWidth && ele.thumbnailHeight
+        ? Math.floor((itemWidth / ele.thumbnailWidth) * ele.thumbnailHeight)
+        : placeholderHeight;
+      // 各列の底部
+      const bottoms = cols.map(col => {
+        if (col.length === 0) return 0;
+        const last = col[col.length - 1];
+        return last.top + last.height;
+      });
+      const idx = bottoms.indexOf(Math.min(...bottoms));
+      const top = bottoms[idx] + gaps;
+      cols[idx].push({ top, left: 0, width: itemWidth, height: h, element: ele });
+    }
+    // 最大高さを返す
+    const finalBottoms = cols.map(col => {
+      if (col.length === 0) return 0;
+      const last = col[col.length - 1];
+      return last.top + last.height;
+    });
+    return Math.max(...finalBottoms);
+  }
+
+  type Beam = {
+    layouts: Layouts;
+    score: number;
+  };
+
+  // calculateLayouts をビームサーチに拡張
   const calculateLayouts = (
     elements: CollectionElement[],
     containerWidth: number
-  ) => {
-    if (!containerWidth) {
-      return [];
-    }
-    const itemNumPerRow = Math.floor(
-      (containerWidth + itemGap) / (minItemWidth + itemGap)
-    );
-    const itemWidth = Math.floor(
-      (containerWidth - itemGap * (itemNumPerRow - 1)) / itemNumPerRow
-    );
+  ): Layouts => {
+    if (!containerWidth) return [];
+    const itemNumPerRow = Math.floor((containerWidth + itemGap) / (minItemWidth + itemGap));
+    const itemWidth = Math.floor((containerWidth - itemGap * (itemNumPerRow - 1)) / itemNumPerRow);
 
-    const newLayouts: Layout[] = [];
+    // 初期ビーム: 空のレイアウト
+    let beams: Beam[] = [{ layouts: Array(itemNumPerRow).fill(0).map(() => []), score: 0 }];
 
-    for (const ele of elements) {
-      const itemHeight =
-        ele.thumbnailWidth && ele.thumbnailHeight
-          ? Math.floor((itemWidth / ele.thumbnailWidth) * ele.thumbnailHeight)
-          : placeholderHeight;
-
-      if (newLayouts.length < itemNumPerRow) {
-        newLayouts.push([
-          {
-            top: 0,
-            left: newLayouts.length * (itemWidth + itemGap),
+    // 各要素を順に探索
+    elements.forEach((ele, idx) => {
+      const newBeams: Beam[] = [];
+      // 要素の高さ計算
+      const height = ele.thumbnailWidth && ele.thumbnailHeight
+        ? Math.floor((itemWidth / ele.thumbnailWidth) * ele.thumbnailHeight)
+        : placeholderHeight;
+      beams.forEach(beam => {
+        beam.layouts.forEach((col, colIdx) => {
+          // レイアウト複製
+          const cloneLayouts = beam.layouts.map(c => [...c]);
+          const bottoms = cloneLayouts.map(c => c.length === 0 ? 0 : c[c.length - 1].top + c[c.length - 1].height);
+          const topPos = bottoms[colIdx] + (cloneLayouts[colIdx].length > 0 ? itemGap : 0);
+          cloneLayouts[colIdx].push({
+            top: topPos,
+            left: colIdx * (itemWidth + itemGap),
             width: itemWidth,
-            height: itemHeight,
+            height,
             element: ele,
-          },
-        ]);
-      } else {
-        // それぞれの列について次に要素を追加する top が最小の列を探す
-        const lastBottomPerColumn = newLayouts.map((v) => {
-          const lastIndex = v.length - 1;
-          const lastTop = v[lastIndex].top;
-          const lastHeight = v[lastIndex].height;
-          return lastTop + lastHeight;
+          });
+          // 評価関数: 残り要素を greedy playout して最終高さを得る
+          const remaining = elements.slice(idx + 1);
+          const score = evaluateGreedy(cloneLayouts, remaining, itemWidth);
+          newBeams.push({ layouts: cloneLayouts, score });
         });
-        const minBottom = Math.min(...lastBottomPerColumn);
-        const minBottomIndex = lastBottomPerColumn.findIndex(
-          (v) => v === minBottom
-        );
+      });
+      // 最良 beamWidth 個を残す
+      newBeams.sort((a, b) => a.score - b.score);
+      beams = newBeams.slice(0, beamWidth);
+    });
 
-        newLayouts[minBottomIndex].push({
-          top: minBottom + itemGap,
-          left: minBottomIndex * (itemWidth + itemGap),
-          width: itemWidth,
-          height: itemHeight,
-          element: ele,
-        });
-      }
-    }
-    return newLayouts;
+    // 最良ビームを返す
+    return beams[0].layouts;
   };
 
-  // layout は 2 次元配列で、各要素は 1 列分の要素を持つ(つまり layouts.length は itemNumPerRow)
-  const layouts = derived<[typeof elements, typeof contentsWidth], Layout[]>(
+  const layouts = derived<[typeof elements, typeof contentsWidth], Layouts>(
     [elements, contentsWidth],
     ([$elements, $contentsWidth], set) => {
       set(calculateLayouts($elements, $contentsWidth));
     }
   );
 
-  layouts.subscribe((v) => {
+  layouts.subscribe(v => {
     setVirtualHeight(
       Math.max(
-        ...v.map((v) => {
-          const lastIndex = v.length - 1;
-          const lastTop = v[lastIndex].top;
-          const lastHeight = v[lastIndex].height;
-          return lastTop + lastHeight;
+        ...v.map(col => {
+          const last = col[col.length - 1];
+          return last.top + last.height;
         })
       )
     );
   });
 
   const calculateVisibleLayouts = (
-    layouts: Layout[],
+    layouts: Layouts,
     scrollTop: number,
     contentsHeight: number
-  ) => {
-    const visibleLayouts: Layout = [];
-
-    for (let i = 0; i < layouts.length; i++) {
-      const layout = layouts[i];
-      // この列で最初に一部でも表示されている layout の index
-      const firstVisibleIndex = layout.findIndex(
-        (v) => v.top + v.height >= scrollTop
-      );
-      // この列で最後に一部でも表示されている layout の index
-      let lastVisibleIndex = layout.findIndex(
-        (v) => v.top >= scrollTop + contentsHeight
-      );
-      // この列で一部も表示されていない場合は最後の layout が表示されている
-      if (lastVisibleIndex === -1) {
-        lastVisibleIndex = layout.length - 1;
-      }
-      // 上下${buffer}行分を含めて返す
-      const sliceStartIndex = Math.max(firstVisibleIndex - buffer, 0);
-      const sliceEndIndex = Math.min(
-        lastVisibleIndex + buffer,
-        layout.length - 1
-      );
-
-      visibleLayouts.push(...layout.slice(sliceStartIndex, sliceEndIndex + 1));
-    }
-    return visibleLayouts;
+  ): Layout[] => {
+    const visible: Layout[] = [];
+    layouts.forEach(col => {
+      const first = col.findIndex(x => x.top + x.height >= scrollTop);
+      let last = col.findIndex(x => x.top >= scrollTop + contentsHeight);
+      if (last === -1) last = col.length - 1;
+      const start = Math.max(first - buffer, 0);
+      const end = Math.min(last + buffer, col.length - 1);
+      visible.push(...col.slice(start, end + 1));
+    });
+    return visible;
   };
 
-  const visibleLayouts = derived<
-    [typeof layouts, typeof contentsScrollY, typeof containerHeight],
-    Layout
-  >(
+  const visibleLayouts = derived<[typeof layouts, typeof contentsScrollY, typeof containerHeight], Layout[]>(
     [layouts, contentsScrollY, containerHeight] as const,
     ([$layouts, $contentsScrollY, $masonryContainerHeight], set) => {
-      set(
-        calculateVisibleLayouts(
-          $layouts,
-          $contentsScrollY,
-          $masonryContainerHeight
-        )
-      );
+      set(calculateVisibleLayouts($layouts, $contentsScrollY, $masonryContainerHeight));
     }
   );
 
-  return {
-    visibleLayouts,
-  };
+  return { visibleLayouts };
 };
