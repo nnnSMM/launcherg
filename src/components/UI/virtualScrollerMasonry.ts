@@ -174,7 +174,22 @@ export const useVirtualScrollerMasonry = (
 
   let prevColumns = 0; // 前回の列数
   let prevLayout: Layout = []; // 前回のレイアウト（配置順序と要素を保持）
-  // prevItemWidth は不要になる
+  let prevElementIds: number[] = [];
+  
+  // 要素リストが変更されたかチェックする関数
+  const didElementsChange = (currentElements: CollectionElement[], previousIds: number[]): boolean => {
+    const currentIds = currentElements.map(el => el.id);
+    if (currentIds.length !== previousIds.length) {
+      return true; // 要素数が変わったら変更あり
+    }
+    // 要素数が同じなら、順序を含めてIDが一致するかチェック
+    for (let i = 0; i < currentIds.length; i++) {
+      if (currentIds[i] !== previousIds[i]) {
+        return true; // IDまたは順序が異なれば変更あり
+      }
+    }
+    return false; // ここまで来たら変更なし
+  };
 
   const layouts = derived<
     [typeof elements, typeof contentsWidth],
@@ -186,6 +201,7 @@ export const useVirtualScrollerMasonry = (
       if (!$contentsWidth || $elements.length === 0) {
         prevColumns = 0;
         prevLayout = [];
+        prevElementIds = [];
         set([]);
         return;
       }
@@ -195,9 +211,11 @@ export const useVirtualScrollerMasonry = (
       const newItemWidth = Math.floor(($contentsWidth - itemGap * (newColumns - 1)) / newColumns);
 
       let resultLayout: Layout;
+      
+      const elementsChanged = didElementsChange($elements, prevElementIds);
 
       // 2. 列数が前回から確実に変わったか、または前回のレイアウトが空か？
-      if (newColumns !== prevColumns || prevLayout.flat().length === 0) {
+      if (newColumns !== prevColumns || elementsChanged || prevLayout.flat().length === 0) {
         // 列数が変わった -> ビームサーチでレイアウトを最初から再計算
         // calculateLayouts内で beamWidth=50 が使用される
         const { layout } = calculateLayouts($elements, $contentsWidth);
@@ -237,6 +255,7 @@ export const useVirtualScrollerMasonry = (
       // 次回比較のために現在の状態を保存
       prevColumns = newColumns;
       prevLayout = resultLayout; // 更新/再計算されたレイアウトを保持
+      prevElementIds = $elements.map(el => el.id);
 
       // 計算結果をセットしてストアを更新
       set(resultLayout);
