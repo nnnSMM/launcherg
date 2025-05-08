@@ -28,8 +28,8 @@
     if (selected === null || Array.isArray(selected)) {
       return;
     }
-    path = selected;
-    dispatcher("update", { value: selected });
+    path = selected.path;
+    dispatcher("update", { value: selected.path });
   };
 </script>
 
