@@ -79,7 +79,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: build
       
       - name: Download artifacts
         uses: actions/download-artifact@v3
@@ -92,12 +92,12 @@ jobs:
           mv changed-files/src-tauri/tauri.conf.json src-tauri/tauri.conf.json
           mv changed-files/.tauri-updater.json .tauri-updater.json
 
-      - name: Push updated files to main
+      - name: Push updated files to build
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add src-tauri/tauri.conf.json
           git add .tauri-updater.json
           git commit -m "Update for release ${{ steps.variables.outputs.version }}"
-          git push origin main
+          git push origin build
         shell: bash
