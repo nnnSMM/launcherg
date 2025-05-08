@@ -13,16 +13,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Extract tag name
-        id: variables
-        run: echo "version=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
-        shell: bash
+      # - name: Extract tag name
+      #   id: variables
+      #   run: echo "version=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
+      #   shell: bash
 
-      - name: Update package.version in tauri.conf.json
-        run: |
-          $json = Get-Content -Path "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
-          $json.package.version = "${{ steps.variables.outputs.version }}"
-          $json | ConvertTo-Json -Depth 100 | Set-Content -Path "src-tauri\tauri.conf.json"
+      # - name: Update package.version in tauri.conf.json
+      #   run: |
+      #     $json = Get-Content -Path "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
+      #     $json.package.version = "${{ steps.variables.outputs.version }}"
+      #     $json | ConvertTo-Json -Depth 100 | Set-Content -Path "src-tauri\tauri.conf.json"
 
       - uses: actions/cache@v3
         with:
